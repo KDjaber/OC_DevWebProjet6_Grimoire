@@ -1,10 +1,26 @@
 const Book = require('../models/Book');
-const fs = require('fs');
+const fs = require('node:fs/promises');
+const sharp = require('sharp');
 
-exports.getAllBooks = (req, res, next) => {
-  Book.find()
-    .then(books => res.status(200).json(books))
+const uploadBookImage = async (buffer, bookTitle) => {
+  const filename = bookTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()
+  const filePath = `images/${filename}-${Date.now()}.webp`
+  try {
+    await sharp(buffer)
+      .resize(null, 300, { fit: 'cover' })
+      .toFormat('webp')
+      .toFile(filePath);
+  } catch (e) {
+    // if the image cannot be uploaded, we don't return any filepath
+    return null
+  }
+  return filePath
+}
+
+exports.getAllBooks = async (req, res, next) => {
+  const books = await Book.find()
     .catch(error => res.status(400).json({ error }));
+  res.status(200).json(books)
 };
 
 exports.getOneBook = (req, res, next) => {
@@ -19,14 +35,16 @@ exports.getBest = (req, res, next) => {
     .catch(error => res.status(500).json({ error }));
 };
 
-exports.createBook = (req, res, next) => {
+exports.createBook = async (req, res, next) => {
   const bookObject = JSON.parse(req.body.book);
   delete bookObject._id;
   delete bookObject._userId;
+
+  const filePath = await uploadBookImage(req.file.buffer, bookObject.title);
   const book = new Book({
     ...bookObject,
     userId: req.auth.userId,
-    imageUrl: `${req.protocol}://${req.get('host')}/images/${req.file.filename}`,
+    imageUrl: filePath ? `${req.protocol}://${req.get('host')}/${filePath}` : null,
     ratings: [],
     averageRating: 0,
   });
@@ -35,45 +53,56 @@ exports.createBook = (req, res, next) => {
     .catch(error => { res.status(400).json({ error }) })
 };
 
-exports.modifyBook = (req, res, next) => {
-  const bookObject = req.file ? {
-    ...JSON.parse(req.body.book),
-    imageUrl: `${req.protocol}://${req.get('host')}/images/${req.file.filename}`
-  } : { ...req.body };
+exports.modifyBook = async (req, res, next) => {
+  let bookObject
+
+  if (req.file) {
+    bookObject = { ...JSON.parse(req.body.book) };
+    const filePath = await uploadBookImage(req.file.buffer, bookObject.title);
+    bookObject.imageUrl = filePath ? `${req.protocol}://${req.get('host')}/${filePath}` : null;
+  } else {
+    bookObject = { ...req.body };
+  }
 
   delete bookObject._userId;
-  Book.findOne({ _id: req.params.id })
-    .then((book) => {
-      if (book.userId != req.auth.userId) {
-        res.status(400).json({ message: 'Non autorisé' })
-      } else {
-        Book.updateOne({ _id: req.params.id }, { ...bookObject, _id: req.params.id })
-          .then(() => res.status(200).json({ message: 'Objet modifié !' }))
-          .catch((error) => { res.status(401).json({ error }) })
-      }
-    })
+  const book = await Book.findOne({ _id: req.params.id })
     .catch((error) => {
       res.status(400).json({ error })
     })
+  const filename = book.imageUrl.split('/images/')[1];
+  await fs.unlink(`images/${filename}`).catch(error => res.status(500).json({ error }))
+  if (book.userId != req.auth.userId) {
+    res.status(400).json({ message: 'Non autorisé' })
+  } else {
+    await Book
+      .updateOne({ _id: req.params.id }, { ...bookObject, _id: req.params.id })
+      .catch((error) => { res.status(401).json({ error }) })
+
+    res.status(200).json({ message: 'Objet modifié !' })
+  }
+
 }
 
-exports.deleteBook = (req, res, next) => {
-  Book.findOne({ _id: req.params.id })
-    .then(book => {
-      if (book.userId != req.auth.userId) {
-        res.status(401).json({ message: 'Not authorized' });
-      } else {
-        const filename = book.imageUrl.split('/images/')[1];
-        fs.unlink(`images/${filename}`, () => {
-          Book.deleteOne({ _id: req.params.id })
-            .then(() => { res.status(200).json({ message: 'Objet supprimé !' }) })
-            .catch(error => res.status(401).json({ error }));
-        });
-      }
-    })
+exports.deleteBook = async (req, res, next) => {
+  const book = await Book.findOne({ _id: req.params.id })
     .catch(error => {
       res.status(500).json({ error });
     });
+
+  if (book?.userId != req.auth.userId) {
+    res.status(401).json({ message: 'Not authorized' });
+  } else {
+    if (book.imageUrl) {
+      const filename = book.imageUrl.split('/images/')[1];
+      await fs.unlink(`images/${filename}`).catch(error => res.status(500).json({ error }))
+    }
+
+    await Book.deleteOne({ _id: req.params.id })
+      .catch(error => res.status(401).json({ error }));
+
+    res.status(200).json({ message: 'Objet supprimé !' });
+  }
+
 };
 
 exports.addRating = (req, res, next) => {
