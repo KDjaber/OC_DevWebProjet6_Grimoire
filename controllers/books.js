@@ -2,6 +2,7 @@ const Book = require('../models/Book');
 const fs = require('node:fs/promises');
 const sharp = require('sharp');
 
+// using Sharp to resize & reformat image + changing file path
 const uploadBookImage = async (buffer, bookTitle) => {
   const filename = bookTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()
   const filePath = `images/${filename}-${Date.now()}.webp`
@@ -17,24 +18,29 @@ const uploadBookImage = async (buffer, bookTitle) => {
   return filePath
 }
 
+// GET route to get all books
 exports.getAllBooks = async (req, res, next) => {
   const books = await Book.find()
     .catch(error => res.status(400).json({ error }));
   res.status(200).json(books)
 };
 
+// GET route to get one books
 exports.getOneBook = (req, res, next) => {
   Book.findOne({ _id: req.params.id })
     .then(book => res.status(200).json(book))
     .catch(error => res.status(404).json({ error }));
 };
 
+// GET route to get the three books with best average rating
 exports.getBest = (req, res, next) => {
   Book.find().sort({ averageRating: -1 }).limit(3)
     .then(book => res.status(200).json(book))
     .catch(error => res.status(500).json({ error }));
 };
 
+// POST route to create one
+// initiating 'ratings' to empty array as expected by tech specifications prevents user from posting with a rating
 exports.createBook = async (req, res, next) => {
   const bookObject = JSON.parse(req.body.book);
   delete bookObject._id;
@@ -45,7 +51,7 @@ exports.createBook = async (req, res, next) => {
     ...bookObject,
     userId: req.auth.userId,
     imageUrl: filePath ? `${req.protocol}://${req.get('host')}/${filePath}` : null,
-    ratings: [],
+    ratings: [], 
     averageRating: 0,
   });
   book.save()
@@ -53,6 +59,7 @@ exports.createBook = async (req, res, next) => {
     .catch(error => { res.status(400).json({ error }) })
 };
 
+// PUT route to modify one book
 exports.modifyBook = async (req, res, next) => {
   let bookObject
 
@@ -83,6 +90,7 @@ exports.modifyBook = async (req, res, next) => {
 
 }
 
+// DELETE route to delete one book
 exports.deleteBook = async (req, res, next) => {
   const book = await Book.findOne({ _id: req.params.id })
     .catch(error => {
@@ -105,6 +113,7 @@ exports.deleteBook = async (req, res, next) => {
 
 };
 
+// POST route to create rating for one book + initiate average rating
 exports.addRating = (req, res, next) => {
   Book.findOne(
     {

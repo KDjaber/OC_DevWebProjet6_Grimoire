@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 
 const User = require('../models/User')
 
+// create user and adds it to database
 exports.signup = (req, res, next) => {
     if (!req.body.password?.trim()?.length) {
         res.status(400).json({ message: 'Mot de passe invalide' })
@@ -21,6 +22,7 @@ exports.signup = (req, res, next) => {
         .catch(error => res.status(500).json({ error }))
 };
 
+//user login
 exports.login = (req, res, next) => {
     User.findOne({ email: req.body.email })
         .then(user => {
