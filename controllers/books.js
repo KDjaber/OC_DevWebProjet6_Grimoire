@@ -106,7 +106,7 @@ exports.deleteBook = async (req, res, next) => {
     }
 
     await Book.deleteOne({ _id: req.params.id })
-      .catch(error => res.status(401).json({ error }));
+      .catch(error => res.status(401).json({ error }))
 
     res.status(200).json({ message: 'Objet supprimé !' });
   }
