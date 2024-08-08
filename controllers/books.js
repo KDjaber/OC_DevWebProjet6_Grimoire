@@ -1,3 +1,4 @@
+const { validationResult } = require('express-validator');
 const Book = require('../models/Book');
 const fs = require('node:fs/promises');
 const sharp = require('sharp');
@@ -62,22 +63,23 @@ exports.createBook = async (req, res, next) => {
 // PUT route to modify one book
 exports.modifyBook = async (req, res, next) => {
   let bookObject
-
+  const book = await Book.findOne({ _id: req.params.id })
+    .catch((error) => {
+      res.status(400).json({ error })
+    })
+  
   if (req.file) {
     bookObject = { ...JSON.parse(req.body.book) };
     const filePath = await uploadBookImage(req.file.buffer, bookObject.title);
     bookObject.imageUrl = filePath ? `${req.protocol}://${req.get('host')}/${filePath}` : null;
+    const filename = book.imageUrl.split('/images/')[1];
+    await fs.unlink(`images/${filename}`).catch(error => res.status(500).json({ error }))
   } else {
     bookObject = { ...req.body };
   }
 
   delete bookObject._userId;
-  const book = await Book.findOne({ _id: req.params.id })
-    .catch((error) => {
-      res.status(400).json({ error })
-    })
-  const filename = book.imageUrl.split('/images/')[1];
-  await fs.unlink(`images/${filename}`).catch(error => res.status(500).json({ error }))
+
   if (book.userId != req.auth.userId) {
     res.status(400).json({ message: 'Non autorisé' })
   } else {
@@ -115,31 +117,39 @@ exports.deleteBook = async (req, res, next) => {
 
 // POST route to create rating for one book + initiate average rating
 exports.addRating = (req, res, next) => {
+  const result = validationResult(req);
+  if (!result.isEmpty()) {
+    if(result.array().some(err => err.path === "rating")) {
+      res.status(400).json({ message: 'La note n\'est pas valide' })
+      return 
+    }
+  }
+
   Book.findOne(
-    {
-      $and: [{ _id: req.params.id }, {
-        ratings: {
-          $not: { $elemMatch: { userId: req.body.userId } }
-        }
-      }]
-    })
-    .then((book) => {
-      if (book) {
-        book.ratings.push({
-          userId: req.body.userId,
-          grade: req.body.rating,
-        })
-        book.averageRating = book.ratings.reduce((total, next) => total + next.grade, 0) / book.ratings.length;
-        book.save()
-          .then((book) => res.status(200).json(book))
-          .catch(error => {
-            res.status(500).json({ error });
-          });
-      } else {
-        res.status(400).json({ message: 'Vous avez déjà noté ce livre' })
+  {
+    $and: [{ _id: req.params.id }, {
+      ratings: {
+        $not: { $elemMatch: { userId: req.auth.userId } }
       }
-    })
-    .catch(error => {
-      res.status(500).json({ error });
-    })
+    }]
+  })
+  .then((book) => {
+    if (book) {
+      book.ratings.push({
+        userId: req.body.userId,
+        grade: req.body.rating,
+      })
+      book.averageRating = book.ratings.reduce((total, next) => total + next.grade, 0) / book.ratings.length;
+      book.save()
+        .then((book) => res.status(200).json(book))
+        .catch(error => {
+          res.status(500).json({ error });
+        });
+    } else {
+      res.status(400).json({ message: 'Vous avez déjà noté ce livre' })
+    }
+  })
+  .catch(error => {
+    res.status(500).json({ error });
+  })
 };

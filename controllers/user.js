@@ -1,3 +1,4 @@
+const { validationResult } = require('express-validator');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
@@ -5,10 +6,19 @@ const User = require('../models/User')
 
 // create user and adds it to database
 exports.signup = (req, res, next) => {
-    if (!req.body.password?.trim()?.length) {
-        res.status(400).json({ message: 'Mot de passe invalide' })
-        return;
+    const result = validationResult(req);
+    if (!result.isEmpty()) {
+        if(result.array().some(err => err.path === "password")) {
+            res.status(400).json({ message: 'Mot de passe invalide' })
+            return;
+        }
+
+        if(result.array().some(err => err.path === "email")) {
+            res.status(400).json({ message: 'Email invalide' })
+            return;
+        }
     }
+
     bcrypt.hash(req.body.password, 10)
         .then(hash => {
             const user = new User({
